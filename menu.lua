@@ -28,7 +28,7 @@ local Theme = {
 
 local function Corner(parent, radius)
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim2.new(0, radius or 8, 0, radius or 8)
+    c.CornerRadius = UDim.new(0, radius or 8)
     c.Parent = parent
     return c
 end

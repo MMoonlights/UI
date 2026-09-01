@@ -1,7 +1,8 @@
 local Menu = loadstring(game:HttpGet("https://raw.githubusercontent.com/MMoonlights/UI/refs/heads/main/menu.lua"))()
 
 local Window = Menu:CreateWindow({
-    Title = "My Hub"
+    Title = "My Cool Hub",
+    Logo = "rbxassetid://123456789",
 })
 
 local PlayerTab = Window:CreateTab("Player")
@@ -47,7 +48,7 @@ CombatTab:CreateButton("Kill All", function()
 end)
 
 local SettingsTab = Window:CreateTab("Settings")
-SettingsTab:CreateLabel("Welcome to RBLX Menu!")
+SettingsTab:CreateLabel("Welcome to Menu")
 SettingsTab:CreateInput("Custom Title", "Enter text...", function(text)
     print("New title:", text)
 end)

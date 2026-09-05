@@ -94,8 +94,8 @@ end
 function Menu:CreateWindow(opts)
     opts = opts or {}
 
-    local guiName = "MUI_" .. (opts.Title or "Menu")
-    
+    local guiName = "MoonUI_" .. (opts.Title or "Menu")
+
     do
         local old = CoreGui:FindFirstChild(guiName)
         if not old and gethui then
@@ -304,131 +304,13 @@ function Menu:CreateWindow(opts)
     Content.ClipsDescendants = true
     Content.Parent = Window
 
-    local DropdownLayer = Instance.new("Frame")
-    DropdownLayer.Name = "DropdownLayer"
-    DropdownLayer.Size = UDim2.new(1, 0, 1, 0)
-    DropdownLayer.BackgroundTransparency = 1
-    DropdownLayer.Visible = false
-    DropdownLayer.ZIndex = 10
-    DropdownLayer.Parent = ScreenGui
-
-    local Shield = Instance.new("TextButton")
-    Shield.Name = "Shield"
-    Shield.Size = UDim2.new(1, 0, 1, 0)
-    Shield.BackgroundColor3 = Color3.new(0, 0, 0)
-    Shield.BackgroundTransparency = 1
-    Shield.BorderSizePixel = 0
-    Shield.Text = ""
-    Shield.AutoButtonColor = false
-    Shield.ZIndex = 1
-    Shield.Parent = DropdownLayer
-
     local activeDropdown = nil
-    local function closeActiveDropdown()
+    local function closeActiveDropdown(instant)
         local dd = activeDropdown
         activeDropdown = nil
-        if dd then dd.hide() end
-    end
-    Shield.MouseButton1Click:Connect(closeActiveDropdown)
-
-    local function makeOverlay(hit, arrow)
-        local holder = Instance.new("ScrollingFrame")
-        holder.Name = "DropdownList"
-        holder.BackgroundColor3 = Theme.Card
-        holder.BorderSizePixel = 0
-        holder.Visible = false
-        holder.ZIndex = 2
-        holder.ScrollBarThickness = 3
-        holder.ScrollBarImageColor3 = Theme.Accent
-        holder.ScrollBarImageTransparency = 0.3
-        holder.ScrollingDirection = Enum.ScrollingDirection.Y
-        holder.CanvasSize = UDim2.new(0, 0, 0, 0)
-        holder.ClipsDescendants = true
-        holder.Parent = DropdownLayer
-        Corner(holder, 8)
-        Stroke(holder, Theme.Border, 1)
-        Padding(holder, 4, 6, 4, 4)
-
-        local lay = Instance.new("UIListLayout")
-        lay.Padding = UDim.new(0, 2)
-        lay.SortOrder = Enum.SortOrder.LayoutOrder
-        lay.Parent = holder
-
-        local W = 0
-        local isOpen = false
-        local overlay = nil
-
-        local function show(targetH, canvasH)
-            if isOpen then return end
-            isOpen = true
-            local scr = getScreenSize()
-            local hp, hs = hit.AbsolutePosition, hit.AbsoluteSize
-            local wp, ws = Window.AbsolutePosition, Window.AbsoluteSize
-            W = math.max(hs.X, 60)
-            if W > scr.X - 16 then W = scr.X - 16 end
-
-            local h = targetH
-            local y
-
-            if hp.Y + hs.Y + 6 + h <= wp.Y + ws.Y - 6 then
-                y = hp.Y + hs.Y + 6
-            elseif hp.Y - 6 - h >= wp.Y + 4 then
-                y = hp.Y - 6 - h
-            else
-                local avail = scr.Y - 8 - (hp.Y + hs.Y + 6)
-                if avail >= 100 then
-                    h = math.min(h, avail)
-                    y = hp.Y + hs.Y + 6
-                else
-                    h = math.min(h, math.max(hp.Y - 8, 80))
-                    y = math.max(8, hp.Y - h)
-                end
-            end
-
-            local x = hp.X
-            local maxX = wp.X + ws.X - W - 6
-            if x > maxX then x = maxX end
-            if x < wp.X + 6 then x = wp.X + 6 end
-            if x > scr.X - W - 8 then x = scr.X - W - 8 end
-            if x < 8 then x = 8 end
-
-            holder.CanvasSize = UDim2.new(0, 0, 0, canvasH)
-            holder.Position = UDim2.fromOffset(x, y)
-            holder.Size = UDim2.fromOffset(W, 0)
-            DropdownLayer.Visible = true
-            holder.Visible = true
-            Tween(Shield, {BackgroundTransparency = 0.6}, 0.15)
-            Tween(arrow, {Rotation = 180}, 0.2)
-            Tween(holder, {Size = UDim2.fromOffset(W, h)}, 0.22, Enum.EasingStyle.Back)
+        if dd then
+            pcall(function() dd.close(instant and true or false) end)
         end
-
-        local function hide()
-            if not isOpen then return end
-            isOpen = false
-            Tween(arrow, {Rotation = 0}, 0.2)
-            Tween(Shield, {BackgroundTransparency = 1}, 0.15)
-            Tween(holder, {Size = UDim2.fromOffset(W, 0)}, 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-            task.delay(0.2, function()
-                if not isOpen then
-                    holder.Visible = false
-                    if not (activeDropdown and activeDropdown.isOpen()) then
-                        DropdownLayer.Visible = false
-                    end
-                end
-            end)
-        end
-
-        overlay = {
-            holder = holder,
-            show   = show,
-            hide   = hide,
-            isOpen = function() return isOpen end,
-            close  = function()
-                hide()
-                if activeDropdown == overlay then activeDropdown = nil end
-            end,
-        }
-        return overlay
     end
 
     local Grip = Instance.new("Frame")
@@ -547,7 +429,7 @@ function Menu:CreateWindow(opts)
             }, 0.28, Enum.EasingStyle.Back)
             Tween(windowStroke, {Transparency = 0}, 0.28)
         else
-            closeActiveDropdown()
+            closeActiveDropdown(true)
             local px, py = Window.Position.X.Offset, Window.Position.Y.Offset
             Tween(Window, {
                 BackgroundTransparency = 1,
@@ -601,7 +483,7 @@ function Menu:CreateWindow(opts)
 
     local function showTab(name)
         if currentTab == name then return end
-        closeActiveDropdown()
+        closeActiveDropdown(true)
 
         if currentTab and tabs[currentTab] then
             local t = tabs[currentTab]
@@ -700,12 +582,19 @@ function Menu:CreateWindow(opts)
         local elements = {}
         elements._currentSection = container
 
+        local orderCounter = 0
+        local function nextOrder()
+            orderCounter += 10
+            return orderCounter
+        end
+
         local function MakeSection(labelText)
             labelText = labelText or "Section"
             local sec = Instance.new("Frame")
             sec.Size = UDim2.new(1, 0, 0, 0)
             sec.AutomaticSize = Enum.AutomaticSize.Y
             sec.BackgroundTransparency = 1
+            sec.LayoutOrder = nextOrder()
             sec.Parent = container
 
             local header = Instance.new("TextButton")
@@ -725,6 +614,7 @@ function Menu:CreateWindow(opts)
             hTitle.TextSize = 11
             hTitle.TextColor3 = Theme.Accent
             hTitle.TextXAlignment = Enum.TextXAlignment.Left
+            hTitle.TextTruncate = Enum.TextTruncate.AtEnd
             hTitle.Text = string.upper(labelText)
             hTitle.Parent = header
 
@@ -755,25 +645,17 @@ function Menu:CreateWindow(opts)
             secLayout.Parent = list
 
             local collapsed = false
-            local function applyHeight(instant)
-                local h = collapsed and 0 or (secLayout.AbsoluteContentSize.Y + 12)
-                if not collapsed and h > 0 then list.Visible = true end
-                if instant then
-                    list.Size = UDim2.new(1, 0, 0, h)
-                else
-                    Tween(list, {Size = UDim2.new(1, 0, 0, h)}, 0.2)
-                end
-                if h <= 0 then list.Visible = false end
+            local manual = false
+
+            local function contentHeight()
+                return secLayout.AbsoluteContentSize.Y + 12
             end
 
-            local pending = false
             secLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                if collapsed or pending then return end
-                pending = true
-                task.defer(function()
-                    pending = false
-                    applyHeight(false)
-                end)
+                if collapsed or manual then return end
+                local h = contentHeight()
+                if h > 13 then list.Visible = true end
+                list.Size = UDim2.new(1, 0, 0, h)
             end)
 
             header.MouseEnter:Connect(function() Tween(header, {BackgroundTransparency = 0.6}, 0.15) end)
@@ -782,11 +664,24 @@ function Menu:CreateWindow(opts)
                 collapsed = not collapsed
                 Tween(hArrow, {Rotation = collapsed and 180 or 0}, 0.2)
                 if collapsed then
+                    manual = true
                     Tween(list, {Size = UDim2.new(1, 0, 0, 0)}, 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-                    task.delay(0.2, function() if collapsed then list.Visible = false end end)
+                    task.delay(0.2, function()
+                        if collapsed then
+                            list.Visible = false
+                            manual = false
+                        end
+                    end)
                 else
                     list.Visible = true
-                    applyHeight(false)
+                    manual = true
+                    Tween(list, {Size = UDim2.new(1, 0, 0, contentHeight())}, 0.2, Enum.EasingStyle.Back)
+                    task.delay(0.22, function()
+                        if not collapsed then
+                            manual = false
+                            list.Size = UDim2.new(1, 0, 0, contentHeight())
+                        end
+                    end)
                 end
             end)
 
@@ -798,6 +693,7 @@ function Menu:CreateWindow(opts)
             row.Size = UDim2.new(1, 0, 0, height or 36)
             row.BackgroundTransparency = 1
             row.BorderSizePixel = 0
+            row.LayoutOrder = nextOrder()
             row.Parent = elements._currentSection or container
             return row
         end
@@ -897,6 +793,7 @@ function Menu:CreateWindow(opts)
             btn.MouseButton1Down:Connect(function()
                 Tween(btn, {Size = UDim2.new(1, -6, 1, -3), Position = UDim2.new(0, 3, 0, 1)}, 0.06)
             end)
+            btn.MouseButton1Up::Connect if false then end
             btn.MouseButton1Up:Connect(rest)
             btn.MouseButton1Click:Connect(function() callback() end)
         end
@@ -1052,7 +949,6 @@ function Menu:CreateWindow(opts)
             label.TextColor3 = Theme.Text
             label.TextXAlignment = Enum.TextXAlignment.Left
             label.TextTruncate = Enum.TextTruncate.AtEnd
-            label.Text = text .. ":  " .. tostring(selected)
             label.Parent = hit
 
             local arrow = Instance.new("TextLabel")
@@ -1066,22 +962,46 @@ function Menu:CreateWindow(opts)
             arrow.Text = "v"
             arrow.Parent = hit
 
-            local overlay = makeOverlay(hit, arrow)
+            local listFrame = Instance.new("ScrollingFrame")
+            listFrame.Name = "DropdownList"
+            listFrame.LayoutOrder = row.LayoutOrder + 1
+            listFrame.Size = UDim2.new(1, 0, 0, 0)
+            listFrame.BackgroundColor3 = Theme.Card
+            listFrame.BorderSizePixel = 0
+            listFrame.Visible = false
+            listFrame.ClipsDescendants = true
+            listFrame.ScrollBarThickness = 3
+            listFrame.ScrollBarImageColor3 = Theme.Accent
+            listFrame.ScrollBarImageTransparency = 0.5
+            listFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+            listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+            listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            listFrame.Parent = elements._currentSection or container
+            Corner(listFrame, 8)
+            Stroke(listFrame, Theme.Border, 1)
+            Padding(listFrame, 4, 6, 4, 4)
+
+            local ll = Instance.new("UIListLayout")
+            ll.Padding = UDim.new(0, 2)
+            ll.SortOrder = Enum.SortOrder.LayoutOrder
+            ll.Parent = listFrame
+
+            local ITEM_H, GAP, MAX_H = 26, 2, 190
+            local isOpen = false
+
+            local api = {}
+            local open, close
 
             local function refreshLabel()
-                label.Text = text .. ":  " .. tostring(selected)
+                label.Text = text .. ":  " .. (selected ~= nil and tostring(selected) or "None")
             end
+            refreshLabel()
 
             local function build()
-                for _, c in ipairs(overlay.holder:GetChildren()) do
+                for _, c in ipairs(listFrame:GetChildren()) do
                     if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
                 end
-                local n = #options
-                local itemH, gap = 26, 2
-                local contentH = n * itemH + math.max(0, n - 1) * gap + 8
-                local targetH = math.min(contentH, 180)
-
-                if n == 0 then
+                if #options == 0 then
                     local empty = Instance.new("TextLabel")
                     empty.Size = UDim2.new(1, 0, 0, 24)
                     empty.BackgroundTransparency = 1
@@ -1089,12 +1009,12 @@ function Menu:CreateWindow(opts)
                     empty.TextSize = 12
                     empty.TextColor3 = Theme.TextMuted
                     empty.Text = "— пусто —"
-                    empty.Parent = overlay.holder
+                    empty.Parent = listFrame
+                    return
                 end
-
                 for i, opt in ipairs(options) do
                     local b = Instance.new("TextButton")
-                    b.Size = UDim2.new(1, 0, 0, itemH)
+                    b.Size = UDim2.new(1, 0, 0, ITEM_H)
                     b.BackgroundColor3 = (opt == selected) and Theme.AccentDim or Theme.CardHover
                     b.Text = tostring(opt)
                     b.TextColor3 = (opt == selected) and Theme.Text or Theme.TextDim
@@ -1104,7 +1024,7 @@ function Menu:CreateWindow(opts)
                     b.TextTruncate = Enum.TextTruncate.AtEnd
                     b.AutoButtonColor = false
                     b.LayoutOrder = i
-                    b.Parent = overlay.holder
+                    b.Parent = listFrame
                     Corner(b, 6)
                     Padding(b, 0, 10, 0, 10)
 
@@ -1118,28 +1038,89 @@ function Menu:CreateWindow(opts)
                         selected = opt
                         refreshLabel()
                         callback(selected)
-                        overlay.close()
+                        close()
                     end)
                 end
-                return targetH, contentH
             end
+
+            local function targetHeight()
+                local n = #options
+                if n == 0 then return 32 end
+                local contentH = n * ITEM_H + (n - 1) * GAP + 8
+                return math.min(contentH, MAX_H)
+            end
+
+            local function ensureVisible(h)
+                local canvasY = hit.AbsolutePosition.Y - container.AbsolutePosition.Y + container.CanvasPosition.Y
+                local bottom = canvasY + hit.AbsoluteSize.Y + h + 20
+                local viewH = container.AbsoluteSize.Y - 24
+                if bottom - viewH > container.CanvasPosition.Y then
+                    Tween(container, {
+                        CanvasPosition = Vector2.new(container.CanvasPosition.X, bottom - viewH)
+                    }, 0.25)
+                end
+            end
+
+            function open()
+                if isOpen then return end
+                closeActiveDropdown()
+                isOpen = true
+                build()
+                local h = targetHeight()
+                listFrame.Visible = true
+                listFrame.CanvasPosition = Vector2.zero
+                Tween(arrow, {Rotation = 180}, 0.2)
+                Tween(listFrame, {Size = UDim2.new(1, 0, 0, h)}, 0.22, Enum.EasingStyle.Back)
+                activeDropdown = api
+                ensureVisible(h)
+            end
+
+            function close(instant)
+                if not isOpen then return end
+                isOpen = false
+                Tween(arrow, {Rotation = 0}, 0.2)
+                if activeDropdown == api then activeDropdown = nil end
+                if instant then
+                    listFrame.Size = UDim2.new(1, 0, 0, 0)
+                    listFrame.Visible = false
+                else
+                    Tween(listFrame, {Size = UDim2.new(1, 0, 0, 0)}, 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+                    task.delay(0.2, function()
+                        if not isOpen then listFrame.Visible = false end
+                    end)
+                end
+            end
+
+            api.close = close
 
             hit.MouseEnter:Connect(function() Tween(hit, {BackgroundColor3 = Theme.CardActive}, 0.15) end)
             hit.MouseLeave:Connect(function() Tween(hit, {BackgroundColor3 = Theme.CardHover}, 0.15) end)
             hit.MouseButton1Click:Connect(function()
-                closeActiveDropdown()
-                activeDropdown = overlay
-                local targetH, contentH = build()
-                overlay.show(targetH, contentH)
+                if isOpen then close() else open() end
             end)
 
-            local api = {}
+            UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch then return end
+                if not isOpen then return end
+                local p = input.Position
+                local hp, hs = hit.AbsolutePosition, hit.AbsoluteSize
+                local lp, ls = listFrame.AbsolutePosition, listFrame.AbsoluteSize
+                local inHit = p.X >= hp.X and p.X <= hp.X + hs.X and p.Y >= hp.Y and p.Y <= hp.Y + hs.Y
+                local inList = p.X >= lp.X and p.X <= lp.X + ls.X and p.Y >= lp.Y and p.Y <= lp.Y + ls.Y
+                if not inHit and not inList then close() end
+            end)
+
             function api:Refresh(newOptions)
                 options = newOptions or {}
                 if selected ~= nil and not table.find(options, selected) then
                     selected = options[1]
                 end
                 refreshLabel()
+                if isOpen then
+                    build()
+                    Tween(listFrame, {Size = UDim2.new(1, 0, 0, targetHeight())}, 0.2)
+                end
             end
             function api:Set(val)
                 selected = val
@@ -1188,7 +1169,35 @@ function Menu:CreateWindow(opts)
             arrow.Text = "v"
             arrow.Parent = hit
 
-            local overlay = makeOverlay(hit, arrow)
+            local listFrame = Instance.new("ScrollingFrame")
+            listFrame.Name = "MultiDropdownList"
+            listFrame.LayoutOrder = row.LayoutOrder + 1
+            listFrame.Size = UDim2.new(1, 0, 0, 0)
+            listFrame.BackgroundColor3 = Theme.Card
+            listFrame.BorderSizePixel = 0
+            listFrame.Visible = false
+            listFrame.ClipsDescendants = true
+            listFrame.ScrollBarThickness = 3
+            listFrame.ScrollBarImageColor3 = Theme.Accent
+            listFrame.ScrollBarImageTransparency = 0.5
+            listFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+            listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+            listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            listFrame.Parent = elements._currentSection or container
+            Corner(listFrame, 8)
+            Stroke(listFrame, Theme.Border, 1)
+            Padding(listFrame, 4, 6, 4, 4)
+
+            local ll = Instance.new("UIListLayout")
+            ll.Padding = UDim.new(0, 2)
+            ll.SortOrder = Enum.SortOrder.LayoutOrder
+            ll.Parent = listFrame
+
+            local ITEM_H, GAP, MAX_H = 30, 2, 190
+            local isOpen = false
+
+            local api = {}
+            local open, close
 
             local function getSelected()
                 local out = {}
@@ -1215,23 +1224,18 @@ function Menu:CreateWindow(opts)
             refreshLabel()
 
             local function build()
-                for _, c in ipairs(overlay.holder:GetChildren()) do
+                for _, c in ipairs(listFrame:GetChildren()) do
                     if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
                 end
-                local n = #options
-                local itemH, gap = 30, 2
-                local contentH = n * itemH + math.max(0, n - 1) * gap + 8
-                local targetH = math.min(contentH, 190)
-
                 for i, opt in ipairs(options) do
                     local isSel = selectedSet[opt] and true or false
                     local b = Instance.new("TextButton")
-                    b.Size = UDim2.new(1, 0, 0, itemH)
+                    b.Size = UDim2.new(1, 0, 0, ITEM_H)
                     b.BackgroundColor3 = Theme.CardHover
                     b.Text = ""
                     b.AutoButtonColor = false
                     b.LayoutOrder = i
-                    b.Parent = overlay.holder
+                    b.Parent = listFrame
                     Corner(b, 6)
 
                     local check = Instance.new("Frame")
@@ -1279,25 +1283,86 @@ function Menu:CreateWindow(opts)
                         callback(getSelected())
                     end)
                 end
-                return targetH, contentH
             end
+
+            local function targetHeight()
+                local n = #options
+                if n == 0 then return 32 end
+                local contentH = n * ITEM_H + (n - 1) * GAP + 8
+                return math.min(contentH, MAX_H)
+            end
+
+            local function ensureVisible(h)
+                local canvasY = hit.AbsolutePosition.Y - container.AbsolutePosition.Y + container.CanvasPosition.Y
+                local bottom = canvasY + hit.AbsoluteSize.Y + h + 20
+                local viewH = container.AbsoluteSize.Y - 24
+                if bottom - viewH > container.CanvasPosition.Y then
+                    Tween(container, {
+                        CanvasPosition = Vector2.new(container.CanvasPosition.X, bottom - viewH)
+                    }, 0.25)
+                end
+            end
+
+            function open()
+                if isOpen then return end
+                closeActiveDropdown()
+                isOpen = true
+                build()
+                local h = targetHeight()
+                listFrame.Visible = true
+                listFrame.CanvasPosition = Vector2.zero
+                Tween(arrow, {Rotation = 180}, 0.2)
+                Tween(listFrame, {Size = UDim2.new(1, 0, 0, h)}, 0.22, Enum.EasingStyle.Back)
+                activeDropdown = api
+                ensureVisible(h)
+            end
+
+            function close(instant)
+                if not isOpen then return end
+                isOpen = false
+                Tween(arrow, {Rotation = 0}, 0.2)
+                if activeDropdown == api then activeDropdown = nil end
+                if instant then
+                    listFrame.Size = UDim2.new(1, 0, 0, 0)
+                    listFrame.Visible = false
+                else
+                    Tween(listFrame, {Size = UDim2.new(1, 0, 0, 0)}, 0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+                    task.delay(0.2, function()
+                        if not isOpen then listFrame.Visible = false end
+                    end)
+                end
+            end
+
+            api.close = close
 
             hit.MouseEnter:Connect(function() Tween(hit, {BackgroundColor3 = Theme.CardActive}, 0.15) end)
             hit.MouseLeave:Connect(function() Tween(hit, {BackgroundColor3 = Theme.CardHover}, 0.15) end)
             hit.MouseButton1Click:Connect(function()
-                closeActiveDropdown()
-                activeDropdown = overlay
-                local targetH, contentH = build()
-                overlay.show(targetH, contentH)
+                if isOpen then close() else open() end
             end)
 
-            local api = {}
+            UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and input.UserInputType ~= Enum.UserInputType.Touch then return end
+                if not isOpen then return end
+                local p = input.Position
+                local hp, hs = hit.AbsolutePosition, hit.AbsoluteSize
+                local lp, ls = listFrame.AbsolutePosition, listFrame.AbsoluteSize
+                local inHit = p.X >= hp.X and p.X <= hp.X + hs.X and p.Y >= hp.Y and p.Y <= hp.Y + hs.Y
+                local inList = p.X >= lp.X and p.X <= lp.X + ls.X and p.Y >= lp.Y and p.Y <= lp.Y + ls.Y
+                if not inHit and not inList then close() end
+            end)
+
             function api:Refresh(newOptions)
                 options = newOptions or {}
                 for k in pairs(selectedSet) do
                     if not table.find(options, k) then selectedSet[k] = nil end
                 end
                 refreshLabel()
+                if isOpen then
+                    build()
+                    Tween(listFrame, {Size = UDim2.new(1, 0, 0, targetHeight())}, 0.2)
+                end
             end
             function api:Set(list)
                 selectedSet = {}
@@ -1458,6 +1523,7 @@ function Menu:CreateWindow(opts)
             row.Size = UDim2.new(1, 0, 0, 0)
             row.AutomaticSize = Enum.AutomaticSize.Y
             row.BackgroundTransparency = 1
+            row.LayoutOrder = nextOrder()
             row.Parent = elements._currentSection or container
 
             local l = Instance.new("TextLabel")
@@ -1485,7 +1551,7 @@ function Menu:CreateWindow(opts)
         end
 
         function elements:Clear()
-            closeActiveDropdown()
+            closeActiveDropdown(true)
             for _, child in ipairs(container:GetChildren()) do
                 if child ~= cPad and child ~= cLayout then
                     child:Destroy()

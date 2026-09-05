@@ -793,7 +793,6 @@ function Menu:CreateWindow(opts)
             btn.MouseButton1Down:Connect(function()
                 Tween(btn, {Size = UDim2.new(1, -6, 1, -3), Position = UDim2.new(0, 3, 0, 1)}, 0.06)
             end)
-            btn.MouseButton1Up::Connect if false then end
             btn.MouseButton1Up:Connect(rest)
             btn.MouseButton1Click:Connect(function() callback() end)
         end

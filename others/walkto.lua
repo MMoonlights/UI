@@ -21,7 +21,7 @@ local DEFAULTS = {
     StopDistance = 4,
     StopHeight = 6,
 
-    DirectWalkDist = 75,
+    DirectWalkDist = 0,
     RepathInterval = 1.2,
     ComputeTimeout = 4,
 
@@ -38,7 +38,7 @@ local DEFAULTS = {
     MissingCharTime = 3,
     MaxTotalTime = 300,
 
-    CornerCutWindow = 5,
+    CornerCutWindow = 0,
     CornerCutInterval = 0.2,
     CornerCutHeight = 3.5,
 
@@ -62,7 +62,7 @@ local phantomTimer = 0
 local destroyed = false
 local descAddedConn = nil
 local descRemovingConn = nil
-local renderConn = nil
+local renderBound = false
 local RENDER_NAME = "PathLib_Walker"
 
 local function isFloorLike(part)
@@ -284,8 +284,14 @@ local function ensureHB()
 end
 
 local function ensureRender()
-    if renderConn then return end
-    renderConn = RunService:BindToRenderStep(RENDER_NAME, Enum.RenderPriority.Input.Value + 1, function(dt)
+    if renderBound then return end
+    renderBound = true
+    RunService:BindToRenderStep(RENDER_NAME, Enum.RenderPriority.Character.Value + 1, function(dt)
+        if destroyed then
+            RunService:UnbindFromRenderStep(RENDER_NAME)
+            renderBound = false
+            return
+        end
         for w in pairs(walkers) do
             local ok, err = pcall(w._update, w, math.min(dt, 0.2))
             if not ok then
@@ -295,7 +301,7 @@ local function ensureRender()
         end
         if not next(walkers) then
             RunService:UnbindFromRenderStep(RENDER_NAME)
-            renderConn = nil
+            renderBound = false
         end
     end)
 end
@@ -347,6 +353,7 @@ function PathLib.WalkTo(targetPos, opts)
     self.strafeSide = 1
     self.blockedAngle = 0
     self.steerDir = Vector3.zero
+    self.moveTimer = 0
     self.lastJump = 0
     self.missingT = 0
     self.frozenT = 0
@@ -416,18 +423,26 @@ end
 
 function Walker:_steer(dir)
     local hum = self:_humanoid()
-    if not hum then return end
+    local hrp = self:_hrp()
+    if not hum or not hrp then return end
     local flat = Vector3.new(dir.X, 0, dir.Z)
     if flat.Magnitude > 1e-3 then
         if self.blockedAngle ~= 0 then
             flat = self:_rotFlat(flat, self.blockedAngle)
         end
         self.steerDir = flat.Unit
-        hum:Move(self.steerDir, false)
     else
         self.steerDir = Vector3.zero
-        hum:Move(Vector3.zero, false)
     end
+end
+
+function Walker:_commandMove(pos, dt)
+    local hum = self:_humanoid()
+    if not hum or not pos then return end
+    self.moveTimer += dt or 0
+    if self.moveTimer < 0.08 then return end
+    self.moveTimer = 0
+    hum:MoveTo(pos)
 end
 
 function Walker:_tryJump()
@@ -556,7 +571,7 @@ function Walker:_repath(force)
         if self.finished or seq ~= self.computeSeq then return end
         self.computing = false
         self.waypoints = {}
-        if self:_hasLOS(startPos, target) and self:_corridorClear(startPos, target) then
+        if self.opts.DirectWalkDist > 0 and self:_hasLOS(startPos, target) and self:_corridorClear(startPos, target) then
             self.mode = "direct"
         else
             self.mode = "greedy"
@@ -727,8 +742,10 @@ function Walker:_greedyUpdate(hrp, hum, dt)
 
     if dist > 0.1 then
         self:_steer(flat.Unit)
+        self:_commandMove(pos + self.steerDir * 12, dt)
     else
         self:_steer(Vector3.zero)
+        self:_commandMove(pos, dt)
     end
 end
 
@@ -750,8 +767,10 @@ function Walker:_directUpdate(hrp, hum, dt)
     end
     if flat.Magnitude > 0.1 then
         self:_steer(flat.Unit)
+        self:_commandMove(self.target, dt)
     else
         self:_steer(Vector3.zero)
+        self:_commandMove(pos, dt)
     end
 end
 
@@ -802,17 +821,6 @@ function Walker:_pathUpdate(hrp, hum, dt)
     self.directTimer += dt
     if self.directTimer >= 0.5 then
         self.directTimer = 0
-        local tdiff = self.target - pos
-        local tFlat = Vector3.new(tdiff.X, 0, tdiff.Z).Magnitude
-        
-        if tFlat < self.opts.DirectWalkDist
-        and math.abs(tdiff.Y) <= self.opts.CornerCutHeight
-        and self:_hasLOS(pos, self.target)
-        and self:_corridorClear(pos, self.target) then
-            self.mode = "direct"
-            return
-        end
-        
         if flatDist > self.bestWpDist + 8 then
             self.bestWpDist = flatDist
             self:_repath(true)
@@ -823,8 +831,10 @@ function Walker:_pathUpdate(hrp, hum, dt)
 
     if flatDist > 0.1 then
         self:_steer(flatDiff.Unit)
+        self:_commandMove(wp.Position, dt)
     else
         self:_steer(Vector3.zero)
+        self:_commandMove(pos, dt)
     end
 end
 
@@ -927,7 +937,6 @@ function Walker:_finish(success, reason)
 
     local hum, hrp = self:_humanoid(), self:_hrp()
     if hum and hrp then
-        hum:Move(Vector3.zero, false)
         hum:MoveTo(hrp.Position)
     end
 
@@ -960,6 +969,7 @@ function Walker:SetTarget(pos)
     self.losTimer = 0
     self.cornerTimer = 0
     self.directTimer = 0
+    self.moveTimer = 0
     self.greedyUntil = 0
     if self.opts.Visualize then
         clearDebug()
@@ -989,7 +999,7 @@ function PathLib.Shutdown()
         hbConn = nil
     end
     RunService:UnbindFromRenderStep(RENDER_NAME)
-    renderConn = nil
+    renderBound = false
     if descAddedConn then
         descAddedConn:Disconnect()
         descAddedConn = nil

@@ -16,15 +16,18 @@ local DEFAULTS = {
     ReachDistance = 3.5,
     StopDistance = 4,
     DirectWalkDist = 75,
-    RepathInterval = 1.25,
-    ProgressInterval = 0.5,
-    ProgressRequired = 0.6,
-    StuckJumpTicks = 2,
-    StuckStrafeTicks = 3,
-    StuckRepathTicks = 4,
+    RepathInterval = 1.2,
+    StuckInterval = 0.35,
+    VelocityStuck = 1.2,
+    JumpStuckTicks = 2,
+    StrafeStuckTicks = 4,
+    RepathStuckTicks = 7,
+    SkipAboveTicks = 12,
     MaxTotalTime = 300,
-    CornerCutWindow = 8,
-    CornerCutInterval = 0.15,
+    CornerCutWindow = 5,
+    CornerCutInterval = 0.2,
+    CornerCutHeight = 3.5,
+    WallFollowAngle = 40,
     Visualize = false,
     OnArrive = nil,
 }
@@ -165,8 +168,8 @@ local function drawWaypoints(wps)
 end
 
 local function snapToGround(pos, rp)
-    local hit = workspace:Raycast(pos + Vector3.new(0, 5, 0), Vector3.new(0, -14, 0), rp)
-    if hit and (pos.Y - hit.Position.Y) <= 6 then
+    local hit = workspace:Raycast(pos + Vector3.new(0, 10, 0), Vector3.new(0, -70, 0), rp)
+    if hit then
         return hit.Position
     end
     return pos
@@ -200,19 +203,19 @@ function PathLib.WalkTo(targetPos, opts)
         Costs = { Water = 20 },
     })
 
-    self.mode = "wait"
+    self.mode = "greedy"
     self.waypoints = {}
     self.wpIndex = 1
     self.finished = false
     self.computing = false
-    self.failRetries = 0
     self.lastCompute = 0
-    self.waitTimer = 0
-    self.progressTimer = 0
+    self.repathTimer = 0
     self.losTimer = 0
     self.cornerTimer = 0
-    self.stuckTicks = 0
+    self.blockedTicks = 0
+    self.stuckTimer = 0
     self.strafeSide = 1
+    self.blockedAngle = 0
     self.lastMoveTo = nil
     self.moveTimer = 0
     self.stopTimer = 0
@@ -231,6 +234,10 @@ function PathLib.WalkTo(targetPos, opts)
     walkersActive += 1
     syncPhantoms()
 
+    if self.opts.Visualize then
+        makeBall(self.target + Vector3.new(0, 1, 0), Color3.fromRGB(255, 255, 255), 0.9)
+    end
+
     walkers[self] = true
     ensureHB()
     self:_repath(true)
@@ -246,10 +253,14 @@ function Walker:SetTarget(pos)
     local hrp = self:_hrp()
     self.target = snapToGround(Vector3.new(pos.X, pos.Y, pos.Z), self.rp)
     self.bestDist = hrp and (self.target - hrp.Position).Magnitude or math.huge
-    self.failRetries = 0
-    self.stuckTicks = 0
+    self.blockedTicks = 0
+    self.blockedAngle = 0
     local hum, hrp2 = self:_humanoid(), self:_hrp()
     if hum and hrp2 then hum:MoveTo(hrp2.Position) end
+    if self.opts.Visualize then
+        clearDebug()
+        makeBall(self.target + Vector3.new(0, 1, 0), Color3.fromRGB(255, 255, 255), 0.9)
+    end
     self:_repath(true)
 end
 
@@ -293,9 +304,10 @@ function Walker:_hasLOS(fromPos, toPos)
     local dir = toPos - fromPos
     local dist = dir.Magnitude
     if dist < 0.5 then return true end
+    if math.abs(toPos.Y - fromPos.Y) > self.opts.CornerCutHeight * 2 then return false end
     local unit = dir.Unit
     local perp = Vector3.new(-unit.Z, 0, unit.X) * (self.opts.AgentRadius * 0.85)
-    local heights = {1.5, 3.2}
+    local heights = {1.5, 3}
     local offsets = {Vector3.zero, perp, -perp}
     for _, h in ipairs(heights) do
         local a = fromPos + Vector3.new(0, h, 0)
@@ -329,30 +341,29 @@ function Walker:_repath(force)
         self.computing = false
         if self.finished then return end
 
-        if not ok or self.path.Status ~= Enum.PathStatus.Success or #self.path:GetWaypoints() == 0 then
-            if self:_hasLOS(hrp.Position, self.target) then
-                self.failRetries = 0
-                self.mode = "direct"
-                self.waypoints = {}
-                if self.opts.Visualize then
-                    clearDebug()
-                    makeBall(self.target + Vector3.new(0, 1, 0), Color3.fromRGB(255, 255, 255), 0.9)
-                end
-            else
-                self.mode = "wait"
-                self.failRetries += 1
-            end
-        else
-            self.failRetries = 0
+        if ok and self.path.Status == Enum.PathStatus.Success and #self.path:GetWaypoints() > 0 then
             self.waypoints = self.path:GetWaypoints()
             self.wpIndex = math.min(2, #self.waypoints)
             self.mode = "path"
+            self.blockedAngle = 0
             if self.opts.Visualize then
                 drawWaypoints(self.waypoints)
                 makeBall(self.target + Vector3.new(0, 1, 0), Color3.fromRGB(255, 255, 255), 0.9)
             end
+        else
+            self.waypoints = {}
+            if self:_hasLOS(hrp.Position, self.target) then
+                self.mode = "direct"
+            else
+                self.mode = "greedy"
+            end
         end
     end)
+end
+
+function Walker:_forceMove(pos)
+    self.lastMoveTo = nil
+    self:_moveTo(pos)
 end
 
 function Walker:_stop()
@@ -383,9 +394,11 @@ function Walker:_tryCornerCut()
     local wps = self.waypoints
     local maxJ = math.min(self.wpIndex + self.opts.CornerCutWindow, #wps)
     for j = self.wpIndex + 1, maxJ do
-        if self:_hasLOS(hrp.Position, wps[j].Position) then
+        local wp = wps[j]
+        if math.abs(wp.Position.Y - hrp.Position.Y) > self.opts.CornerCutHeight then break end
+        if self:_hasLOS(hrp.Position, wp.Position) then
             self.wpIndex = j
-            self:_moveTo(wps[j].Position)
+            self:_moveTo(wp.Position)
         else
             break
         end
@@ -424,36 +437,125 @@ function Walker:_learnBlocker()
     end
 end
 
-function Walker:_progressCheck(dt, hrp)
-    local dist = (self.target - hrp.Position).Magnitude
-    self.progressTimer += dt
-    if self.progressTimer < self.opts.ProgressInterval then return end
-    self.progressTimer = 0
+function Walker:_stuckCheck(hrp, hum)
+    self.stuckTimer += 0.35
+    if self.stuckTimer < self.opts.StuckInterval then return end
+    self.stuckTimer = 0
 
-    if dist < self.bestDist - self.opts.ProgressRequired then
-        self.bestDist = dist
-        self.stuckTicks = 0
+    local v = hrp.AssemblyLinearVelocity
+    local speed = Vector3.new(v.X, 0, v.Z).Magnitude
+
+    if speed > self.opts.VelocityStuck then
+        if self.blockedTicks > 0 then self.blockedTicks -= 1 end
+        if self.blockedAngle ~= 0 and speed > 3 then
+            self.blockedAngle = math.max(0, self.blockedAngle - math.rad(30))
+        end
+        return
+    end
+
+    self.blockedTicks += 1
+    if self.blockedTicks == self.opts.JumpStuckTicks then
+        hum.Jump = true
+    elseif self.blockedTicks == self.opts.StrafeStuckTicks then
+        self.strafeSide = -self.strafeSide
+        self.blockedAngle = math.rad(self.opts.WallFollowAngle) * self.strafeSide
+        local pos = hrp.Position
+        local flat = Vector3.new(self.target.X - pos.X, 0, self.target.Z - pos.Z)
+        if flat.Magnitude > 0.1 then
+            local c, s = math.cos(self.blockedAngle), math.sin(self.blockedAngle)
+            local dir = flat.Unit
+            dir = Vector3.new(dir.X * c - dir.Z * s, 0, dir.X * s + dir.Z * c)
+            self:_forceMove(pos + dir * 5)
+        end
+    elseif self.blockedTicks >= self.opts.RepathStuckTicks then
+        self.blockedTicks = 0
+        self:_learnBlocker()
+        self:_repath(true)
+    end
+end
+
+function Walker:_greedyUpdate(hrp, hum)
+    local pos = hrp.Position
+    local flat = Vector3.new(self.target.X - pos.X, 0, self.target.Z - pos.Z)
+    local dist = flat.Magnitude
+
+    if self.target.Y - pos.Y > 2.2 and dist < 10 then
+        hum.Jump = true
+    end
+
+    local dir
+    if dist > 0.1 then
+        dir = flat.Unit
+        if self.blockedAngle > 0 then
+            local c, s = math.cos(self.blockedAngle), math.sin(self.blockedAngle)
+            dir = Vector3.new(dir.X * c - dir.Z * s, 0, dir.X * s + dir.Z * c)
+        end
     else
-        self.stuckTicks += 1
-        local hum = self:_humanoid()
-        if self.stuckTicks == self.opts.StuckJumpTicks then
-            if hum then hum.Jump = true end
-        elseif self.stuckTicks == self.opts.StuckStrafeTicks then
-            if hum then
-                local fwd = hum.MoveDirection
-                if fwd.Magnitude > 0.1 then
-                    self.strafeSide = -self.strafeSide
-                    local perp = Vector3.new(-fwd.Z, 0, fwd.X) * self.strafeSide
-                    self.lastMoveTo = nil
-                    self:_moveTo(hrp.Position + perp * 4)
-                end
-            end
-        elseif self.stuckTicks >= self.opts.StuckRepathTicks then
-            self.stuckTicks = 0
-            self:_learnBlocker()
-            self:_repath(true)
+        dir = Vector3.zero
+    end
+
+    self:_moveTo(pos + dir * 5)
+end
+
+function Walker:_directUpdate(hrp, hum)
+    local pos = hrp.Position
+    self.losTimer += 0.35
+    if self.losTimer >= 0.35 then
+        self.losTimer = 0
+        if not self:_hasLOS(pos, self.target) then
+            self.mode = "greedy"
+            return self:_repath(true)
         end
     end
+    if self.target.Y - pos.Y > 2.2
+    and Vector3.new(self.target.X - pos.X, 0, self.target.Z - pos.Z).Magnitude < 10 then
+        hum.Jump = true
+    end
+    self:_moveTo(Vector3.new(self.target.X, pos.Y, self.target.Z))
+end
+
+function Walker:_pathUpdate(hrp, hum)
+    local pos = hrp.Position
+    local wps = self.waypoints
+
+    if #wps == 0 or self.wpIndex > #wps then
+        self.mode = "greedy"
+        return self:_repath(true)
+    end
+
+    local wp = wps[self.wpIndex]
+    local diff = wp.Position - pos
+    local flatDist = Vector3.new(diff.X, 0, diff.Z).Magnitude
+
+    if flatDist <= self.opts.ReachDistance and math.abs(diff.Y) < 5 then
+        self.wpIndex += 1
+        if self.wpIndex <= #wps then
+            local nwp = wps[self.wpIndex]
+            if nwp.Action == Enum.PathWaypointAction.Jump then
+                hum.Jump = true
+            end
+            self:_forceMove(nwp.Position)
+        end
+        return
+    end
+
+    if wp.Position.Y - pos.Y > 6.5 and self.blockedTicks >= self.opts.SkipAboveTicks then
+        self.wpIndex += 1
+        return
+    end
+
+    if wp.Action == Enum.PathWaypointAction.Jump and flatDist <= 7 then
+        hum.Jump = true
+    end
+
+    self.cornerTimer += 0.35
+    if self.cornerTimer >= self.opts.CornerCutInterval then
+        self.cornerTimer = 0
+        self:_tryCornerCut()
+    end
+
+    local cur = wps[math.min(self.wpIndex, #wps)]
+    self:_moveTo(cur.Position)
 end
 
 function Walker:_update(dt)
@@ -470,85 +572,29 @@ function Walker:_update(dt)
 
     local pos = hrp.Position
     local dist = (self.target - pos).Magnitude
-    if dist <= self.opts.StopDistance then
+    if dist <= self.opts.StopDistance and math.abs(self.target.Y - pos.Y) < 6 then
         return self:_finish(true, "arrived")
     end
     if os.clock() - self.startClock > self.opts.MaxTotalTime then
         return self:_finish(false, "timeout")
     end
 
-    self:_progressCheck(dt, hrp)
+    self.repathTimer += dt
+    if self.repathTimer >= self.opts.RepathInterval then
+        self.repathTimer = 0
+        self:_repath(false)
+    end
+
+    self:_stuckCheck(hrp, hum)
     if self.finished then return end
 
-    if self.mode == "wait" then
-        self:_stop()
-        self.waitTimer += dt
-        if self.waitTimer >= self.opts.RepathInterval then
-            self.waitTimer = 0
-            self:_repath(true)
-        end
-        return
+    if self.mode == "path" then
+        self:_pathUpdate(hrp, hum)
+    elseif self.mode == "direct" then
+        self:_directUpdate(hrp, hum)
+    else
+        self:_greedyUpdate(hrp, hum)
     end
-
-    if self.mode == "direct" then
-        self.losTimer += dt
-        if self.losTimer >= 0.35 then
-            self.losTimer = 0
-            if not self:_hasLOS(pos, self.target) then
-                self.mode = "wait"
-                self:_stop()
-                return self:_repath(true)
-            end
-        end
-        self:_moveTo(Vector3.new(self.target.X, pos.Y, self.target.Z))
-        return
-    end
-
-    local wps = self.waypoints
-    if #wps == 0 then
-        self.mode = "wait"
-        self:_stop()
-        return self:_repath(true)
-    end
-
-    if self.wpIndex > #wps then
-        if self:_hasLOS(pos, self.target) then
-            self:_moveTo(self.target)
-        else
-            self.mode = "wait"
-            self:_stop()
-            self:_repath(true)
-        end
-        return
-    end
-
-    local wp = wps[self.wpIndex]
-    if (wp.Position - pos).Magnitude <= self.opts.ReachDistance then
-        self.wpIndex += 1
-        if self.wpIndex <= #wps then
-            local nwp = wps[self.wpIndex]
-            if nwp.Action == Enum.PathWaypointAction.Jump then
-                hum.Jump = true
-            end
-            self.lastMoveTo = nil
-            self:_moveTo(nwp.Position)
-        end
-        return
-    end
-
-    if wp.Action == Enum.PathWaypointAction.Jump
-    and (wp.Position - pos).Magnitude <= 6 then
-        hum.Jump = true
-    end
-
-    self.cornerTimer += dt
-    if self.cornerTimer >= self.opts.CornerCutInterval then
-        self.cornerTimer = 0
-        self:_tryCornerCut()
-    end
-
-    local cur = wps[math.min(self.wpIndex, #wps)]
-    self:_moveTo(cur.Position)
 end
 
 return PathLib

@@ -59,6 +59,11 @@ local walkersActive = 0
 local walkers = {}
 local hbConn = nil
 local phantomTimer = 0
+local destroyed = false
+local descAddedConn = nil
+local descRemovingConn = nil
+local renderConn = nil
+local RENDER_NAME = "PathLib_Walker"
 
 local function isFloorLike(part)
     return part.CFrame.UpVector.Y > 0.6
@@ -147,6 +152,7 @@ local function classifyPart(inst)
 end
 
 function PathLib.Rescan()
+    if destroyed then return end
     table.clear(phantoms)
     for _, d in ipairs(workspace:GetDescendants()) do
         classifyPart(d)
@@ -154,19 +160,21 @@ function PathLib.Rescan()
     syncPhantoms()
 end
 
-workspace.DescendantAdded:Connect(function(d)
+descAddedConn = workspace.DescendantAdded:Connect(function(d)
+    if destroyed then return end
     task.defer(classifyPart, d)
 end)
 
-workspace.DescendantRemoving:Connect(function(d)
+descRemovingConn = workspace.DescendantRemoving:Connect(function(d)
     phantoms[d] = nil
     disabledNow[d] = nil
 end)
 
 task.spawn(function()
-    PathLib.Rescan()
-    while true do
+    if not destroyed then PathLib.Rescan() end
+    while not destroyed do
         task.wait(PathLib.RescanInterval)
+        if destroyed then break end
         if walkersActive > 0 or PathLib.GhostMode then
             PathLib.Rescan()
         end
@@ -269,15 +277,25 @@ local function ensureHB()
                 if not ok then warn("[PathLib] reapply:", err) end
             end
         end
+        if hbConn and not next(walkers) then
+            stopHB()
+        end
+    end)
+end
+
+local function ensureRender()
+    if renderConn then return end
+    renderConn = RunService:BindToRenderStep(RENDER_NAME, Enum.RenderPriority.Input.Value + 1, function(dt)
         for w in pairs(walkers) do
-            local ok, err = pcall(w._update, w, dt)
+            local ok, err = pcall(w._update, w, math.min(dt, 0.2))
             if not ok then
                 warn("[PathLib] update:", err)
                 w:_finish(false, "error: " .. tostring(err))
             end
         end
-        if hbConn and not next(walkers) then
-            stopHB()
+        if not next(walkers) then
+            RunService:UnbindFromRenderStep(RENDER_NAME)
+            renderConn = nil
         end
     end)
 end
@@ -286,6 +304,7 @@ local Walker = {}
 Walker.__index = Walker
 
 function PathLib.WalkTo(targetPos, opts)
+    if destroyed then return nil end
     opts = opts or {}
     assert(typeof(targetPos) == "Vector3", "PathLib.WalkTo: targetPos должен быть Vector3")
 
@@ -354,6 +373,7 @@ function PathLib.WalkTo(targetPos, opts)
 
     walkers[self] = true
     ensureHB()
+    ensureRender()
     self:_repath(true)
     return self
 end
@@ -403,10 +423,10 @@ function Walker:_steer(dir)
             flat = self:_rotFlat(flat, self.blockedAngle)
         end
         self.steerDir = flat.Unit
-        hum:Move(self.steerDir)
+        hum:Move(self.steerDir, false)
     else
         self.steerDir = Vector3.zero
-        hum:Move(Vector3.zero)
+        hum:Move(Vector3.zero, false)
     end
 end
 
@@ -907,7 +927,7 @@ function Walker:_finish(success, reason)
 
     local hum, hrp = self:_humanoid(), self:_hrp()
     if hum and hrp then
-        hum:Move(Vector3.zero)
+        hum:Move(Vector3.zero, false)
         hum:MoveTo(hrp.Position)
     end
 
@@ -958,6 +978,28 @@ function Walker:Wait()
         task.wait(0.05)
     end
     return self.lastSuccess, self.lastReason
+end
+
+function PathLib.Shutdown()
+    if destroyed then return end
+    destroyed = true
+    PathLib.StopAll()
+    if hbConn then
+        hbConn:Disconnect()
+        hbConn = nil
+    end
+    RunService:UnbindFromRenderStep(RENDER_NAME)
+    renderConn = nil
+    if descAddedConn then
+        descAddedConn:Disconnect()
+        descAddedConn = nil
+    end
+    if descRemovingConn then
+        descRemovingConn:Disconnect()
+        descRemovingConn = nil
+    end
+    restorePhantoms()
+    clearDebug()
 end
 
 return PathLib

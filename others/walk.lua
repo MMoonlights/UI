@@ -5,9 +5,8 @@ local PathfindingService = game:GetService("PathfindingService")
 local PathLib = {}
 PathLib.DebugMode = false
 PathLib.GhostMode = false
-PathLib.PhantomTransparency = 0.9
-
-local PHANTOM_NAMES = {"hitbox", "barrier", "wall", "zone", "bounds", "collision", "invis", "block", "gate"}
+PathLib.PhantomTransparency = 0.85
+PathLib.RescanInterval = 25
 
 local DEFAULTS = {
     AgentRadius = 2.2,
@@ -17,7 +16,6 @@ local DEFAULTS = {
     ReachDistance = 3.5,
     StopDistance = 4,
     DirectWalkDist = 75,
-    ClimbForcePath = 6,
     RepathInterval = 1.25,
     ProgressInterval = 0.5,
     ProgressRequired = 0.6,
@@ -32,8 +30,8 @@ local DEFAULTS = {
 }
 
 local phantoms = {}
-local realBlockers = {}
-local ghostApplied = {}
+local disabledNow = {}
+local walkersActive = 0
 
 local walkers = {}
 local hbConn = nil
@@ -55,26 +53,52 @@ local function stopHB()
     end
 end
 
-local function nameHint(name)
-    local n = string.lower(name)
-    for _, k in ipairs(PHANTOM_NAMES) do
-        if string.find(n, k, 1, true) then return true end
-    end
-    return false
-end
-
 local function isFloorLike(part)
-    if part.CFrame.UpVector.Y > 0.6 then return true end
-    return false
+    return part.CFrame.UpVector.Y > 0.6
 end
 
-local function classifyPart(part)
-    if not part:IsA("BasePart") then return end
-    if not part.CanCollide then return end
-    if part.Transparency >= PathLib.PhantomTransparency or nameHint(part.Name) then
-        if not isFloorLike(part) then
-            phantoms[part] = true
+local function disablePhantom(part)
+    if disabledNow[part] then return end
+    disabledNow[part] = part.CanCollide
+    part.CanCollide = false
+end
+
+local function restorePhantoms()
+    for part, v in pairs(disabledNow) do
+        if part.Parent then part.CanCollide = v end
+    end
+    table.clear(disabledNow)
+end
+
+local function syncPhantoms()
+    if walkersActive <= 0 then
+        restorePhantoms()
+        return
+    end
+    if PathLib.GhostMode then
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("BasePart") and d.CanCollide and not isFloorLike(d) then
+                disablePhantom(d)
+            end
         end
+    else
+        for part in pairs(phantoms) do
+            if part.Parent then disablePhantom(part) end
+        end
+    end
+end
+
+local function classifyPart(inst)
+    if not inst:IsA("BasePart") then return end
+    if not inst.CanCollide then return end
+    if isFloorLike(inst) then return end
+    local t = inst.Transparency
+    local ltm = inst.LocalTransparencyModifier
+    if t >= PathLib.PhantomTransparency
+    or ltm >= PathLib.PhantomTransparency
+    or (not inst.CanQuery and not inst.CanTouch) then
+        phantoms[inst] = true
+        if walkersActive > 0 then disablePhantom(inst) end
     end
 end
 
@@ -83,33 +107,20 @@ function PathLib.Rescan()
     for _, d in ipairs(workspace:GetDescendants()) do
         classifyPart(d)
     end
+    syncPhantoms()
 end
 
 workspace.DescendantAdded:Connect(function(d)
     task.defer(classifyPart, d)
 end)
 
-task.spawn(PathLib.Rescan)
-
-local function applyGhost()
-    local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local y = hrp and hrp.Position.Y or 0
-    for part in pairs(phantoms) do
-        if not realBlockers[part] and part.Parent and ghostApplied[part] == nil then
-            if not (isFloorLike(part) and part.Position.Y < y - 1) then
-                ghostApplied[part] = part.CanCollide
-                part.CanCollide = false
-            end
-        end
+task.spawn(function()
+    PathLib.Rescan()
+    while true do
+        task.wait(PathLib.RescanInterval)
+        PathLib.Rescan()
     end
-end
-
-local function restoreGhost()
-    for part, v in pairs(ghostApplied) do
-        if part.Parent then part.CanCollide = v end
-    end
-    table.clear(ghostApplied)
-end
+end)
 
 local debugFolder = nil
 local function dbgFolder()
@@ -131,7 +142,7 @@ end
 local function makeBall(pos, color, size, shape)
     local m = Instance.new("Part")
     m.Size = Vector3.one * (size or 0.5)
-    if shape then m.Shape = shape else m.Shape = Enum.PartType.Ball end
+    m.Shape = shape or Enum.PartType.Ball
     m.Position = pos
     m.Anchored = true
     m.CanCollide = false
@@ -208,17 +219,17 @@ function PathLib.WalkTo(targetPos, opts)
 
     local hrp = self:_hrp()
     self.startClock = os.clock()
-    self.bestDist = hrp and (self.target - hrp.Position).Magnitude or math.huge
 
     self.target = snapToGround(Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), self.rp)
     self.bestDist = hrp and (self.target - hrp.Position).Magnitude or math.huge
 
-    if PathLib.GhostMode then applyGhost() end
-
-    if hum and hrp then
-        local hum2, hrp2 = self:_humanoid(), self:_hrp()
-        if hum2 and hrp2 then hum2:MoveTo(hrp2.Position) end
+    local hum0 = self:_humanoid()
+    if hum0 and hrp then
+        hum0:MoveTo(hrp.Position)
     end
+
+    walkersActive += 1
+    syncPhantoms()
 
     walkers[self] = true
     ensureHB()
@@ -226,11 +237,8 @@ function PathLib.WalkTo(targetPos, opts)
     return self
 end
 
-local hum = nil
-
 function PathLib.StopAll()
     for w in pairs(walkers) do w:_finish(false, "stopAll") end
-    restoreGhost()
 end
 
 function Walker:SetTarget(pos)
@@ -254,6 +262,10 @@ function Walker:_finish(success, reason)
     self.finished = true
     walkers[self] = nil
     stopHB()
+    walkersActive = math.max(0, walkersActive - 1)
+    if walkersActive == 0 then
+        restorePhantoms()
+    end
     local hum, hrp = self:_humanoid(), self:_hrp()
     if hum and hrp then hum:MoveTo(hrp.Position) end
     if self.opts.Visualize and success then
@@ -297,27 +309,6 @@ function Walker:_hasLOS(fromPos, toPos)
     return true
 end
 
-function Walker:_disablePhantoms(hrpY)
-    if PathLib.GhostMode then return nil end
-    local disabled = {}
-    for part in pairs(phantoms) do
-        if not realBlockers[part] and part.Parent then
-            if not (isFloorLike(part) and part.Position.Y < hrpY - 1) then
-                disabled[part] = part.CanCollide
-                part.CanCollide = false
-            end
-        end
-    end
-    return disabled
-end
-
-local function restoreDisabled(disabled)
-    if not disabled then return end
-    for part, v in pairs(disabled) do
-        if part.Parent then part.CanCollide = v end
-    end
-end
-
 function Walker:_repath(force)
     if self.computing or self.finished then return end
     local now = os.clock()
@@ -325,13 +316,9 @@ function Walker:_repath(force)
     self.lastCompute = now
     self.computing = true
 
-    local hrp0 = self:_hrp()
-    local disabled = hrp0 and self:_disablePhantoms(hrp0.Position.Y) or nil
-
     task.spawn(function()
         local hrp = self:_hrp()
         if not hrp or self.finished then
-            restoreDisabled(disabled)
             self.computing = false
             return
         end
@@ -339,7 +326,6 @@ function Walker:_repath(force)
         local ok = pcall(function()
             self.path:ComputeAsync(hrp.Position, self.target)
         end)
-        restoreDisabled(disabled)
         self.computing = false
         if self.finished then return end
 
@@ -416,9 +402,26 @@ function Walker:_findBlocker()
     end
     for h = 0.5, 3.5, 0.75 do
         local hit = workspace:Raycast(hrp.Position + Vector3.new(0, h, 0), fwd * 3, self.rp)
-        if hit then return hit.Instance end
+        if hit and hit.Instance and hit.Instance:IsA("BasePart") then
+            return hit.Instance
+        end
     end
     return nil
+end
+
+function Walker:_learnBlocker()
+    local blocker = self:_findBlocker()
+    if not blocker or phantoms[blocker] then return end
+    if not blocker.CanCollide or isFloorLike(blocker) then return end
+    local minDim = math.min(blocker.Size.X, blocker.Size.Y, blocker.Size.Z)
+    if blocker.Transparency >= 0.5 or minDim <= 1 then
+        phantoms[blocker] = true
+        if walkersActive > 0 then disablePhantom(blocker) end
+        if self.opts.Visualize then
+            makeBall(blocker.Position, Color3.fromRGB(160, 60, 255), 1.2, Enum.PartType.Block)
+        end
+        self:_repath(true)
+    end
 end
 
 function Walker:_progressCheck(dt, hrp)
@@ -447,17 +450,7 @@ function Walker:_progressCheck(dt, hrp)
             end
         elseif self.stuckTicks >= self.opts.StuckRepathTicks then
             self.stuckTicks = 0
-            local blocker = self:_findBlocker()
-            if blocker and phantoms[blocker] and not realBlockers[blocker] then
-                realBlockers[blocker] = true
-                if ghostApplied[blocker] ~= nil then
-                    if blocker.Parent then blocker.CanCollide = ghostApplied[blocker] end
-                    ghostApplied[blocker] = nil
-                end
-                if self.opts.Visualize then
-                    makeBall(blocker.Position, Color3.fromRGB(255, 40, 40), 1.2, Enum.PartType.Block)
-                end
-            end
+            self:_learnBlocker()
             self:_repath(true)
         end
     end
@@ -557,4 +550,5 @@ function Walker:_update(dt)
     local cur = wps[math.min(self.wpIndex, #wps)]
     self:_moveTo(cur.Position)
 end
+
 return PathLib

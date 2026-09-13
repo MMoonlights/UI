@@ -286,7 +286,7 @@ end
 local function ensureRender()
     if renderBound then return end
     renderBound = true
-    RunService:BindToRenderStep(RENDER_NAME, Enum.RenderPriority.Character.Value + 1, function(dt)
+    RunService:BindToRenderStep(RENDER_NAME, Enum.RenderPriority.Last.Value, function(dt)
         if destroyed then
             RunService:UnbindFromRenderStep(RENDER_NAME)
             renderBound = false
@@ -436,13 +436,10 @@ function Walker:_steer(dir)
     end
 end
 
-function Walker:_commandMove(pos, dt)
+function Walker:_commandMove(_, _)
     local hum = self:_humanoid()
-    if not hum or not pos then return end
-    self.moveTimer += dt or 0
-    if self.moveTimer < 0.08 then return end
-    self.moveTimer = 0
-    hum:MoveTo(pos)
+    if not hum then return end
+    hum:Move(self.steerDir, false)
 end
 
 function Walker:_tryJump()
@@ -497,6 +494,28 @@ function Walker:_corridorClear(fromPos, toPos)
     return true
 end
 
+function Walker:_simplifyWaypoints(wps)
+    if #wps <= 2 then return wps end
+    local out = { wps[1] }
+    local i = 2
+    while i <= #wps do
+        local best = i
+        for j = #wps, i + 1, -1 do
+            local a = out[#out].Position
+            local b = wps[j].Position
+            if math.abs(a.Y - b.Y) <= self.opts.CornerCutHeight
+            and self:_hasLOS(a, b)
+            and self:_corridorClear(a, b) then
+                best = j
+                break
+            end
+        end
+        out[#out + 1] = wps[best]
+        i = best + 1
+    end
+    return out
+end
+
 function Walker:_repath(force)
     if self.finished then return end
     if self.computing then
@@ -545,15 +564,15 @@ function Walker:_repath(force)
             if ok and path.Status == Enum.PathStatus.Success then
                 local wps = path:GetWaypoints()
                 if #wps > 0 then
-                    self.waypoints = wps
-                    self.wpIndex = math.min(2, #wps)
+                    self.waypoints = self:_simplifyWaypoints(wps)
+                    self.wpIndex = math.min(2, #self.waypoints)
                     self.mode = "path"
                     self.blockedAngle = 0
                     self.bestWpDist = math.huge
                     self.greedyUntil = 0
                     self.computing = false
                     if self.opts.Visualize then
-                        drawWaypoints(wps)
+                        clearDebug()
                         local _, label = makeTargetMarker(self.target)
                         self.dbgText = label
                     end
@@ -571,11 +590,7 @@ function Walker:_repath(force)
         if self.finished or seq ~= self.computeSeq then return end
         self.computing = false
         self.waypoints = {}
-        if self.opts.DirectWalkDist > 0 and self:_hasLOS(startPos, target) and self:_corridorClear(startPos, target) then
-            self.mode = "direct"
-        else
-            self.mode = "greedy"
-        end
+        self.mode = "greedy"
         if self.repathQueued then
             self.repathQueued = false
             task.defer(function()
@@ -648,9 +663,6 @@ function Walker:_learnBlocker()
     or not blocker.CanQuery then
         phantoms[blocker] = true
         if walkersActive > 0 then disablePhantom(blocker) end
-        if self.opts.Visualize then
-            makeBall(blocker.Position, Color3.fromRGB(160, 60, 255), 1.2, Enum.PartType.Block)
-        end
         return true
     end
     return false
@@ -794,13 +806,7 @@ function Walker:_pathUpdate(hrp, hum, dt)
         return
     end
 
-    if flatDist < 8
-    and flatDist > 0.05
-    and self.steerDir.Magnitude > 0.5
-    and self.steerDir:Dot(flatDiff.Unit) < -0.45 then
-        self:_advanceWaypoint()
-        return
-    end
+
 
     if (wp.Position.Y - pos.Y) > self.opts.SkipAboveHeight
     and self.blockedTicks >= self.opts.SkipAboveTicks then
@@ -907,8 +913,6 @@ function Walker:_update(dt)
 
     if self.mode == "path" then
         self:_pathUpdate(hrp, hum, dt)
-    elseif self.mode == "direct" then
-        self:_directUpdate(hrp, hum, dt)
     else
         self:_greedyUpdate(hrp, hum, dt)
     end

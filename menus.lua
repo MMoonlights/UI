@@ -32,6 +32,59 @@ local Theme = {
     FontLight   = Enum.Font.Gotham,
 }
 
+local ThemePresets = {
+    Crimson = {
+        Accent = Color3.fromRGB(230, 60, 80),
+        AccentHover = Color3.fromRGB(255, 90, 110),
+        AccentDim = Color3.fromRGB(80, 25, 35),
+    },
+    Purple = {
+        Accent = Color3.fromRGB(145, 90, 255),
+        AccentHover = Color3.fromRGB(175, 125, 255),
+        AccentDim = Color3.fromRGB(48, 30, 88),
+    },
+    Ocean = {
+        Accent = Color3.fromRGB(55, 145, 255),
+        AccentHover = Color3.fromRGB(90, 175, 255),
+        AccentDim = Color3.fromRGB(22, 50, 88),
+    },
+    Emerald = {
+        Accent = Color3.fromRGB(45, 190, 125),
+        AccentHover = Color3.fromRGB(75, 220, 155),
+        AccentDim = Color3.fromRGB(20, 70, 48),
+    },
+    Amber = {
+        Accent = Color3.fromRGB(235, 155, 45),
+        AccentHover = Color3.fromRGB(255, 185, 75),
+        AccentDim = Color3.fromRGB(82, 52, 18),
+    },
+}
+
+local CurrentTheme = "Crimson"
+
+function Menu:SetTheme(name)
+    local preset = ThemePresets[name]
+    if not preset then return false end
+    CurrentTheme = name
+    for key, value in pairs(preset) do
+        Theme[key] = value
+    end
+    return true
+end
+
+function Menu:GetTheme()
+    return CurrentTheme
+end
+
+function Menu:GetThemes()
+    local names = {}
+    for name in pairs(ThemePresets) do
+        names[#names + 1] = name
+    end
+    table.sort(names)
+    return names
+end
+
 local function getScreenSize()
     local cam = workspace.CurrentCamera
     if cam and cam.ViewportSize.X > 0 then
@@ -93,6 +146,9 @@ end
 
 function Menu:CreateWindow(opts)
     opts = opts or {}
+    if opts.Theme then
+        self:SetTheme(opts.Theme)
+    end
 
     local guiName = "MoonUI_" .. (opts.Title or "Menu")
 
@@ -1583,6 +1639,20 @@ function Menu:CreateWindow(opts)
 
     function window:SetTitle(text)
         TitleLabel.Text = tostring(text or "")
+    end
+
+    function window:SetToggleKey(key)
+        if typeof(key) == "EnumItem" then
+            toggleKey = key
+        end
+    end
+
+    function window:GetToggleKey()
+        return toggleKey
+    end
+
+    function window:GetTheme()
+        return CurrentTheme
     end
 
     function window:GetScreenGui()

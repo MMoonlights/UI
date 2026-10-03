@@ -1629,6 +1629,36 @@ function Menu:CreateWindow(opts)
         if tabs[name] then showTab(name) end
     end
 
+    function window:RemoveTab(name)
+        local tab = tabs[name]
+        if not tab then return end
+        closeActiveDropdown(true)
+        if tab.Button then tab.Button:Destroy() end
+        if tab.Container then tab.Container:Destroy() end
+        tabs[name] = nil
+        if currentTab == name then currentTab = nil end
+        local firstName
+        local firstOrder = math.huge
+        for tabName, data in pairs(tabs) do
+            if data.Button and data.Button.LayoutOrder < firstOrder then
+                firstName = tabName
+                firstOrder = data.Button.LayoutOrder
+            end
+        end
+        if firstName then showTab(firstName) end
+    end
+
+    function window:ClearTabs()
+        closeActiveDropdown(true)
+        for name, tab in pairs(tabs) do
+            if tab.Button then tab.Button:Destroy() end
+            if tab.Container then tab.Container:Destroy() end
+            tabs[name] = nil
+        end
+        currentTab = nil
+        tabCount = 0
+    end
+
     function window:SetOpen(state)
         SetOpen(state and true or false)
     end
@@ -1653,6 +1683,39 @@ function Menu:CreateWindow(opts)
 
     function window:GetTheme()
         return CurrentTheme
+    end
+
+    function window:SetTheme(name)
+        local preset = ThemePresets[name]
+        if not preset then return false end
+        local oldAccent = Theme.Accent
+        local oldHover = Theme.AccentHover
+        local oldDim = Theme.AccentDim
+        Menu:SetTheme(name)
+        local function swap(value)
+            if value == oldAccent then return Theme.Accent end
+            if value == oldHover then return Theme.AccentHover end
+            if value == oldDim then return Theme.AccentDim end
+            return nil
+        end
+        for _, object in ipairs(ScreenGui:GetDescendants()) do
+            if object:IsA("GuiObject") then
+                local background = swap(object.BackgroundColor3)
+                if background then object.BackgroundColor3 = background end
+                if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+                    local textColor = swap(object.TextColor3)
+                    if textColor then object.TextColor3 = textColor end
+                end
+                if object:IsA("ImageLabel") or object:IsA("ImageButton") then
+                    local imageColor = swap(object.ImageColor3)
+                    if imageColor then object.ImageColor3 = imageColor end
+                end
+            elseif object:IsA("UIStroke") then
+                local strokeColor = swap(object.Color)
+                if strokeColor then object.Color = strokeColor end
+            end
+        end
+        return true
     end
 
     function window:GetScreenGui()

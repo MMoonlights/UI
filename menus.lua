@@ -9,7 +9,7 @@ local CoreGui          = game:GetService("CoreGui")
 local Player = Players.LocalPlayer
 local Mouse  = Player:GetMouse()
 
-local MIN_W, MIN_H = 500, 350
+local MIN_W, MIN_H = 360, 300
 
 local Theme = {
     Background  = Color3.fromRGB(14, 14, 18),
@@ -126,8 +126,14 @@ function Menu:CreateWindow(opts)
         if not ok then ScreenGui.Parent = Player:WaitForChild("PlayerGui") end
     end
 
+    local screenSize = getScreenSize()
     local winSize = opts.Size or Vector2.new(580, 420)
-    winSize = Vector2.new(math.max(winSize.X, MIN_W), math.max(winSize.Y, MIN_H))
+    local maxW = math.max(MIN_W, screenSize.X - 16)
+    local maxH = math.max(MIN_H, screenSize.Y - 16)
+    winSize = Vector2.new(
+        math.clamp(winSize.X, MIN_W, maxW),
+        math.clamp(winSize.Y, MIN_H, maxH)
+    )
 
     local ToggleButton = Instance.new("TextButton")
     ToggleButton.Name = "Toggle"
@@ -1565,6 +1571,22 @@ function Menu:CreateWindow(opts)
 
     function window:SelectTab(name)
         if tabs[name] then showTab(name) end
+    end
+
+    function window:SetOpen(state)
+        SetOpen(state and true or false)
+    end
+
+    function window:IsOpen()
+        return open
+    end
+
+    function window:SetTitle(text)
+        TitleLabel.Text = tostring(text or "")
+    end
+
+    function window:GetScreenGui()
+        return ScreenGui
     end
 
     function window:Destroy()

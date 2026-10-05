@@ -602,7 +602,7 @@ function Menu:CreateWindow(opts)
         label.TextColor3 = Theme.TextDim
         label.TextXAlignment = Enum.TextXAlignment.Left
         label.TextTruncate = Enum.TextTruncate.AtEnd
-        label.Text = (icon and (icon .. "  ") or "") .. name
+        label.Text = name
         label.Parent = btn
 
         btn.MouseEnter:Connect(function()

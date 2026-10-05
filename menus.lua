@@ -816,6 +816,8 @@ function Menu:CreateWindow(opts)
             hit.MouseButton1Click:Connect(function()
                 state = not state
                 refresh()
+                local env = getgenv and getgenv() or _G
+                if env.FastSCFeatureEvent then task.spawn(env.FastSCFeatureEvent, "Toggle: " .. tostring(text)) end
                 callback(state)
             end)
 
@@ -856,7 +858,11 @@ function Menu:CreateWindow(opts)
                 Tween(btn, {Size = UDim2.new(1, -6, 1, -3), Position = UDim2.new(0, 3, 0, 1)}, 0.06)
             end)
             btn.MouseButton1Up:Connect(rest)
-            btn.MouseButton1Click:Connect(function() callback() end)
+            btn.MouseButton1Click:Connect(function()
+                local env = getgenv and getgenv() or _G
+                if env.FastSCFeatureEvent then task.spawn(env.FastSCFeatureEvent, "Button: " .. tostring(text)) end
+                callback()
+            end)
         end
 
         function elements:CreateSlider(text, sopts, callback)
@@ -1098,6 +1104,8 @@ function Menu:CreateWindow(opts)
                     b.MouseButton1Click:Connect(function()
                         selected = opt
                         refreshLabel()
+                        local env = getgenv and getgenv() or _G
+                        if env.FastSCFeatureEvent then task.spawn(env.FastSCFeatureEvent, "Dropdown: " .. tostring(text)) end
                         callback(selected)
                         close()
                     end)
